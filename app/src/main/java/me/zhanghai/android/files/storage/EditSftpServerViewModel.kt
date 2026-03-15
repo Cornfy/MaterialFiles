@@ -22,8 +22,12 @@ import me.zhanghai.android.files.util.isReady
 import java.io.IOException
 
 class EditSftpServerViewModel : ViewModel() {
+    // 增加：用于暂存从文件读取但尚未保存的明文私钥
+    private var _pendingPrivateKey: String? = null
+
+    // 修改：String -> Unit，不向 UI 暴露私钥内容
     private val _readPrivateKeyFileState =
-        MutableStateFlow<ActionState<Path, String>>(ActionState.Ready())
+        MutableStateFlow<ActionState<Path, Unit>>(ActionState.Ready())
     val readPrivateKeyFileState = _readPrivateKeyFileState.asStateFlow()
 
     fun readPrivateKeyFile(file: Path) {
@@ -39,11 +43,17 @@ class EditSftpServerViewModel : ViewModel() {
                     val bytes = file.readAllBytes()
                     String(bytes)
                 }
-                ActionState.Success(file, text)
+                _pendingPrivateKey = text // 暂存在影子变量中
+                ActionState.Success(file, Unit) // 只返回 Unit
             } catch (e: Exception) {
                 ActionState.Error(file, e)
             }
         }
+    }
+
+    // 增加：获取当前有效的私钥（优先使用新读取的，否则使用已有的）
+    fun getEffectivePrivateKey(existingKey: String?): String? {
+        return _pendingPrivateKey ?: existingKey
     }
 
     fun finishReadingPrivateKeyFile() {

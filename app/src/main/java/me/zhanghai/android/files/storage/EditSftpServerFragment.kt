@@ -153,11 +153,15 @@ class EditSftpServerFragment : Fragment() {
                         authenticationType = AuthenticationType.PASSWORD
                         binding.passwordEdit.setText(authentication.password)
                     }
-                    is PublicKeyAuthentication -> {
-                        authenticationType = AuthenticationType.PUBLIC_KEY
-                        binding.privateKeyEdit.setText(authentication.privateKey)
-                        binding.privateKeyPasswordEdit.setText(authentication.privateKeyPassword)
-                    }
+		    is PublicKeyAuthentication -> {
+    		        authenticationType = AuthenticationType.PUBLIC_KEY
+    		        // 修正：如果私钥存在，显示掩码并禁用输入框，不显示原始字符串
+    		        if (authentication.privateKey.isNotEmpty()) {
+    		            binding.privateKeyEdit.setText("••••••••••••••••")
+    		            binding.privateKeyEdit.isEnabled = false
+    		        }
+    		        binding.privateKeyPasswordEdit.setText(authentication.privateKeyPassword)
+    		    }
                 }
                 binding.pathEdit.setText(server.relativePath)
                 binding.nameEdit.setText(server.customName)
@@ -212,7 +216,7 @@ class EditSftpServerFragment : Fragment() {
         viewModel.readPrivateKeyFile(result)
     }
 
-    private fun onReadPrivateKeyFileStateChanged(state: ActionState<Path, String>) {
+    private fun onReadPrivateKeyFileStateChanged(state: ActionState<Path, Unit>) {
         when (state) {
             is ActionState.Ready, is ActionState.Running -> {
                 val isReading = state is ActionState.Running
@@ -223,7 +227,8 @@ class EditSftpServerFragment : Fragment() {
                 }
             }
             is ActionState.Success -> {
-                binding.privateKeyEdit.setText(state.result)
+		binding.privateKeyEdit.setText("••••••••••••••••") 
+		binding.privateKeyEdit.isEnabled = false
                 viewModel.finishReadingPrivateKeyFile()
             }
             is ActionState.Error -> {
@@ -317,17 +322,25 @@ class EditSftpServerFragment : Fragment() {
                 PasswordAuthentication(password)
             }
             AuthenticationType.PUBLIC_KEY -> {
-                val privateKey = binding.privateKeyEdit.text.toString().takeIfNotEmpty()
-                val privateKeyPassword =
-                    binding.privateKeyPasswordEdit.text.toString().takeIfNotEmpty()
-                if (privateKey == null) {
+		// 1. 从 ViewModel 获取当前私钥（可能是明文或已加密的密文）
+		val currentKey = viewModel.getEffectivePrivateKey(
+		    (args.server?.authentication as? PublicKeyAuthentication)?.privateKey
+		)
+
+		// 2. 尝试解密（如果是旧明文则直接返回，如果是密文则解密）
+		val plainKey = SftpCryptoManager.decrypt(currentKey)
+
+		val privateKeyPassword = binding.privateKeyPasswordEdit.text.toString().takeIfNotEmpty()
+
+                if (plainKey == null) {
                     binding.privateKeyLayout.error =
                         getString(R.string.storage_edit_sftp_server_private_key_error_empty)
                     if (errorEdit == null) {
                         errorEdit = binding.privateKeyEdit
                     }
                 } else {
-                    val exception = PublicKeyAuthentication.validate(privateKey, privateKeyPassword)
+        	    // 3. 使用解密后的明文进行校验
+        	    val exception = PublicKeyAuthentication.validate(plainKey, privateKeyPassword)
                     if (exception != null) {
                         exception.printStackTrace()
                         if (exception is KeyDecryptionFailedException) {
@@ -348,7 +361,8 @@ class EditSftpServerFragment : Fragment() {
                     }
                 }
                 if (errorEdit == null) {
-                    PublicKeyAuthentication(privateKey!!, privateKeyPassword)
+		    // 这里暂时构造明文对象，我们在最后存入磁盘前进行加密
+		    PublicKeyAuthentication(plainKey!!, privateKeyPassword)
                 } else {
                     null
                 }

@@ -9,22 +9,48 @@ import me.zhanghai.android.files.settings.Settings
 import me.zhanghai.android.files.util.removeFirst
 import me.zhanghai.android.files.util.valueCompat
 
+import me.zhanghai.android.files.provider.sftp.client.PublicKeyAuthentication
+
 object Storages {
     fun addOrReplace(storage: Storage) {
+        // 修改：在保存前进行加密处理
+        val storageToSave = encryptSftpServerIfNeeded(storage)
+        
         val storages = Settings.STORAGES.valueCompat.toMutableList().apply {
-            val index = indexOfFirst { it.id == storage.id }
+            val index = indexOfFirst { it.id == storageToSave.id }
             if (index != -1) {
-                this[index] = storage
+                this[index] = storageToSave
             } else {
-                this += storage
+                this += storageToSave
             }
         }
         Settings.STORAGES.putValue(storages)
     }
 
+    // 新增辅助方法
+    private fun encryptSftpServerIfNeeded(storage: Storage): Storage {
+        if (storage is SftpServer && storage.authentication is PublicKeyAuthentication) {
+            val auth = storage.authentication
+            // 如果私钥还是明文（没有 KENC: 前缀），则加密
+            val encryptedKey = SftpCryptoManager.encrypt(auth.privateKey)
+            if (encryptedKey != auth.privateKey) {
+                return SftpServer(
+                    storage.id,
+                    storage.customName,
+                    storage.authority,
+                    auth.copy(privateKey = encryptedKey!!),
+                    storage.relativePath
+                )
+            }
+        }
+        return storage
+    }
+
+    // replace 方法也调用 encryptSftpServerIfNeeded
     fun replace(storage: Storage) {
+        val storageToSave = encryptSftpServerIfNeeded(storage)
         val storages = Settings.STORAGES.valueCompat.toMutableList()
-            .apply { this[indexOfFirst { it.id == storage.id }] = storage }
+            .apply { this[indexOfFirst { it.id == storageToSave.id }] = storageToSave }
         Settings.STORAGES.putValue(storages)
     }
 
